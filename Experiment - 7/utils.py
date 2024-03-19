@@ -98,8 +98,10 @@ def decoder(transmitted, IM_SHAPE_X, IM_SHAPE_Y):
     
     img_ctr = 0
     ptr = 0
+    x_ptr = 0
+    y_ptr = 0
 
-    while ptr < len(transmitted):
+    while ptr < len(transmitted) and (x_ptr < IM_SHAPE_Y and y_ptr < IM_SHAPE_X):
         len_c = 1
         while transmitted[ptr:ptr+len_c] not in decoding_scheme.keys():
             len_c += 1
@@ -108,8 +110,13 @@ def decoder(transmitted, IM_SHAPE_X, IM_SHAPE_Y):
         code = transmitted[ptr:ptr+len_c]
 
         val = decoding_scheme[code]
-
-        recovered_img[img_ctr%IM_SHAPE_Y, img_ctr//IM_SHAPE_Y] = val
+        
+        x_ptr = img_ctr%IM_SHAPE_Y
+        y_ptr = img_ctr//IM_SHAPE_Y
+        try:
+            recovered_img[x_ptr, y_ptr] = val
+        except Exception as e:
+            return recovered_img.T
 
         img_ctr += 1
         ptr += len_c
@@ -139,3 +146,59 @@ def huffmanenco(image):
     printNodes(nodes[0])
     transmitted = transmitter(image, coding_scheme, IM_SHAPE_X, IM_SHAPE_Y)
     return transmitted
+
+
+# CHANNEL CODING
+def bpsk_modulation(bits):
+    phase_states = [0, np.pi]
+    phase_signal = [phase_states[int(b)] for b in bits]
+    samples_per_symbol = 10
+    phase_signal = np.repeat(phase_signal, samples_per_symbol)
+    t = np.arange(0,len(phase_signal))/5e3
+    fc = 1e3
+    carrier_signal = np.sin(2*np.pi*fc*t+phase_signal)
+    return carrier_signal, phase_signal
+
+
+# CHANNEL DECODING
+from numpy.lib.stride_tricks import sliding_window_view
+
+def channel_decoder(data, fs, fc, samples_per_symbol, make_plot = None):
+    t = np.arange(0,len(data))/fs
+
+    carrier_signal = np.sin(2*np.pi*fc*t)
+    x = carrier_signal * data
+    x = np.sum(sliding_window_view(x, window_shape=samples_per_symbol), axis=1)    
+    symbols = x[::samples_per_symbol]
+
+    bits = symbols<0
+    bits = bits.astype(int)
+    if(make_plot!=None):
+        plt.plot(np.repeat(bits, samples_per_symbol)[make_plot[0]:make_plot[1]])
+    bits = ''.join(list(bits.astype(str)))
+    return bits
+
+
+# NOISE
+def get_awgn(data, SNR):
+    mean = 0
+    data_power = np.array(data, dtype = np.int64) ** 2
+    data_avg_power = np.mean(data_power)
+    data_avg_db = 10 * np.log10(data_avg_power)
+
+    noise_avg_db = data_avg_db - SNR
+    noise_avg_power = 10 ** (noise_avg_db / 10)
+    std_deviation = np.sqrt(noise_avg_power)
+
+    gaussian_noise = np.random.normal(mean, std_deviation, len(data))
+    return gaussian_noise
+
+
+# ERROR
+def get_bit_error_rate(bits, transmitted):
+    bit_error = 0
+    for x, y in zip(bits, transmitted):
+        if(x!=y):
+            bit_error += 1
+            
+    return bit_error / len(transmitted) * 100
